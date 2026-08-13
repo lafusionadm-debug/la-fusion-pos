@@ -8,21 +8,32 @@ acordadas en `La_Fusion_Especificacion_v2.md`.
 ```
 backend/
   prisma/schema.prisma   → modelo de datos completo (locales, menú, mesas, pedidos, caja, etc.)
-  src/index.js            → API mínima: menú, mesas, crear pedido, actualizar estado de ítem
+  prisma/seed.js          → datos de prueba (local, menú, productos, mesas)
+  src/index.js            → API: menú, mesas, pedidos (con modificadores), caja, pagos, comprobante
   package.json            → dependencias (Express, Prisma, Socket.io)
   .env.example             → variables de entorno necesarias
+frontend/
+  src/App.jsx              → pantallas: tipo de orden → mesa (si aplica) → menú → comandar
+  src/api.js                → todas las llamadas al backend
+  .env.example               → URL del backend + ID del local de prueba
 ```
 
-No incluye todavía: frontend, impresión ESC/POS, bot de WhatsApp, facturación DGI.
+No incluye todavía: impresión ESC/POS, bot de WhatsApp, facturación DGI.
 Se van agregando en las próximas iteraciones.
 
-## Cómo levantarlo
+## Cómo levantar el backend
 
 1. `cd backend && npm install`
 2. Crear una base Postgres (local o en la nube) y copiar `.env.example` a `.env` con la URL real.
 3. `npm run prisma:migrate` — crea las tablas a partir del schema.
-4. `npm run prisma:seed` — carga datos de prueba (un local, canales, comanderas, menú "Cena" con productos y modificadores, mesas). Podés correrlo de nuevo cuando quieras: borra los datos de prueba anteriores y los vuelve a crear.
+4. `npm run prisma:seed` — carga datos de prueba (un local, canales, comanderas, menú "Cena" con productos y modificadores, mesas). Al correrlo, va a imprimir en la consola el ID del local — copiarlo, se necesita para el frontend.
 5. `npm run dev` — levanta la API en `http://localhost:4000`.
+
+## Cómo levantar el frontend
+
+1. `cd frontend && npm install`
+2. Copiar `.env.example` a `.env`, y pegar en `VITE_LOCAL_ID` el ID que imprimió el seed del backend.
+3. `npm run dev` — levanta la app en `http://localhost:5173`. Con el backend corriendo en paralelo, ya se puede armar un pedido de punta a punta.
 
 ## Endpoints de prueba
 
