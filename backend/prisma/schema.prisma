@@ -1,0 +1,333 @@
+// Sistema de Gestión La Fusión — Esquema de base de datos
+// Single-tenant v1. Ver README.md sobre el camino a multi-tenant a futuro.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Locales e infraestructura
+// ─────────────────────────────────────────────
+
+model Local {
+  id        String   @id @default(cuid())
+  nombre    String
+  direccion String?
+  createdAt DateTime @default(now())
+
+  menus            Menu[]
+  zonas            Zona[]
+  gruposDispositivos GrupoDispositivos[]
+  usuarios         Usuario[]
+  pedidos          Pedido[]
+  cajas            Caja[]
+}
+
+model GrupoDispositivos {
+  id        String   @id @default(cuid())
+  local     Local    @relation(fields: [localId], references: [id])
+  localId   String
+  nombre    String // ej. "Caja Central"
+
+  impresoras Impresora[]
+}
+
+model Impresora {
+  id                  String            @id @default(cuid())
+  grupoDispositivos   GrupoDispositivos @relation(fields: [grupoDispositivosId], references: [id])
+  grupoDispositivosId String
+  nombre              String
+  tipoConexion        String // WiFi/Ethernet, USB, etc.
+  marca               String?
+  tamanoPapel         String? // ej. "80mm"
+  contenido           ContenidoImpresion @default(COMANDA)
+  copiaCompleta       Boolean           @default(true) // true = imprime todo el pedido (Cocina/Sushi/Pizza); false = solo filtra por canal (Barra)
+
+  canales Canal[] @relation("ImpresoraCanales")
+}
+
+enum ContenidoImpresion {
+  COMANDA
+  TICKET
+  AMBOS
+}
+
+model Canal {
+  id     String @id @default(cuid())
+  nombre String @unique // Cocina, Sushi, Pizza, Barra...
+
+  productos  Producto[]
+  impresoras Impresora[] @relation("ImpresoraCanales")
+}
+
+// ─────────────────────────────────────────────
+// Menú
+// ─────────────────────────────────────────────
+
+model Menu {
+  id             String   @id @default(cuid())
+  local          Local    @relation(fields: [localId], references: [id])
+  localId        String
+  nombre         String // Cena, Cafetería, Mediodía
+  horarioInicio  String? // "19:00"
+  horarioFin     String? // "23:30"
+  activo         Boolean  @default(true)
+
+  categorias Categoria[]
+}
+
+model Categoria {
+  id      String @id @default(cuid())
+  menu    Menu   @relation(fields: [menuId], references: [id])
+  menuId  String
+  nombre  String
+  orden   Int    @default(0)
+
+  productos Producto[]
+}
+
+model Producto {
+  id          String   @id @default(cuid())
+  categoria   Categoria @relation(fields: [categoriaId], references: [id])
+  categoriaId String
+  nombre      String
+  precio      Decimal
+  imagenUrl   String?
+  activo      Boolean  @default(true)
+  canal       Canal?   @relation(fields: [canalId], references: [id]) // a qué comandera se manda
+  canalId     String?
+
+  gruposModificadores GrupoModificador[]
+  itemsPedido         ItemPedido[]
+}
+
+model GrupoModificador {
+  id             String   @id @default(cuid())
+  producto       Producto @relation(fields: [productoId], references: [id])
+  productoId     String
+  nombre         String // ej. "3x2 hot"
+  cantidadGratis Int      @default(0) // 0 = todo se cobra; N = cupo incluido
+  seleccionMax   Int?     // tope de unidades totales a elegir (null = sin tope más allá del cupo)
+
+  opciones OpcionModificador[]
+}
+
+model OpcionModificador {
+  id                 String           @id @default(cuid())
+  grupoModificador   GrupoModificador @relation(fields: [grupoModificadorId], references: [id])
+  grupoModificadorId String
+  nombre             String
+  precioAdicional    Decimal          @default(0) // se cobra solo si se supera el cupo gratis del grupo
+
+  itemsSeleccionados ItemModificadorSeleccionado[]
+}
+
+// ─────────────────────────────────────────────
+// Mesas
+// ─────────────────────────────────────────────
+
+model Zona {
+  id      String @id @default(cuid())
+  local   Local  @relation(fields: [localId], references: [id])
+  localId String
+  nombre  String // Interior, Terraza, etc.
+
+  mesas Mesa[]
+}
+
+model Mesa {
+  id         String @id @default(cuid())
+  zona       Zona   @relation(fields: [zonaId], references: [id])
+  zonaId     String
+  numero     Int
+  capacidad  Int?
+  estado     String @default("libre") // libre, ocupada, reservada
+
+  pedidos Pedido[]
+}
+
+// ─────────────────────────────────────────────
+// Pedidos
+// ─────────────────────────────────────────────
+
+enum TipoOrden {
+  MESA
+  LLEVAR
+  ENVIO
+}
+
+enum CanalOrigen {
+  WHATSAPP
+  SALON
+}
+
+enum EstadoPedido {
+  ABIERTO
+  ENVIADO
+  LISTO
+  COBRADO
+  CERRADO
+  ANULADO
+}
+
+model Pedido {
+  id            String       @id @default(cuid())
+  local         Local        @relation(fields: [localId], references: [id])
+  localId       String
+  tipo          TipoOrden
+  mesa          Mesa?        @relation(fields: [mesaId], references: [id])
+  mesaId        String?
+  canalOrigen   CanalOrigen
+  mozo          Usuario?     @relation(fields: [mozoId], references: [id])
+  mozoId        String?
+  cliente       Cliente?     @relation(fields: [clienteId], references: [id])
+  clienteId     String?
+  estado        EstadoPedido @default(ABIERTO)
+  notas         String?
+  createdAt     DateTime     @default(now())
+  cerradoAt     DateTime?
+
+  items       ItemPedido[]
+  pagos       Pago[]
+  comprobante Comprobante?
+}
+
+enum EstadoItem {
+  PENDIENTE
+  ENVIADO
+  LISTO
+}
+
+model ItemPedido {
+  id          String     @id @default(cuid())
+  pedido      Pedido     @relation(fields: [pedidoId], references: [id])
+  pedidoId    String
+  producto    Producto   @relation(fields: [productoId], references: [id])
+  productoId  String
+  cantidad    Int        @default(1)
+  estado      EstadoItem @default(PENDIENTE)
+  tandaEnvio  Int        @default(1) // agrupa qué se imprimió junto
+  createdAt   DateTime   @default(now())
+
+  modificadoresSeleccionados ItemModificadorSeleccionado[]
+}
+
+model ItemModificadorSeleccionado {
+  id                  String            @id @default(cuid())
+  itemPedido          ItemPedido        @relation(fields: [itemPedidoId], references: [id])
+  itemPedidoId        String
+  opcionModificador   OpcionModificador @relation(fields: [opcionModificadorId], references: [id])
+  opcionModificadorId String
+  cantidad            Int               @default(1)
+}
+
+// ─────────────────────────────────────────────
+// Clientes (base para futuro CRM / marketing 4.12)
+// ─────────────────────────────────────────────
+
+model Cliente {
+  id        String   @id @default(cuid())
+  nombre    String?
+  telefono  String?  @unique
+  email     String?
+  notas     String?
+  optOutPromos Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  pedidos Pedido[]
+}
+
+// ─────────────────────────────────────────────
+// Pagos y facturación
+// ─────────────────────────────────────────────
+
+enum MetodoPago {
+  EFECTIVO
+  DEBITO
+  CREDITO
+  TRANSFERENCIA
+}
+
+model Pago {
+  id         String     @id @default(cuid())
+  pedido     Pedido     @relation(fields: [pedidoId], references: [id])
+  pedidoId   String
+  metodo     MetodoPago
+  monto      Decimal
+  propina    Decimal    @default(0)
+  descuento  Decimal    @default(0)
+  createdAt  DateTime   @default(now())
+}
+
+enum TipoComprobante {
+  FISCAL
+  NO_FISCAL
+}
+
+model Comprobante {
+  id         String          @id @default(cuid())
+  pedido     Pedido          @relation(fields: [pedidoId], references: [id])
+  pedidoId   String          @unique
+  tipo       TipoComprobante
+  estadoDgi  String?         // pendiente/enviado/error, si es fiscal
+  numero     String?
+  createdAt  DateTime        @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Caja
+// ─────────────────────────────────────────────
+
+model Caja {
+  id             String    @id @default(cuid())
+  local          Local     @relation(fields: [localId], references: [id])
+  localId        String
+  responsable    Usuario   @relation(fields: [responsableId], references: [id])
+  responsableId  String
+  montoInicial   Decimal
+  montoFinal     Decimal?
+  diferencia     Decimal?
+  fechaApertura  DateTime  @default(now())
+  fechaCierre    DateTime?
+
+  movimientos MovimientoCaja[]
+}
+
+model MovimientoCaja {
+  id          String   @id @default(cuid())
+  caja        Caja     @relation(fields: [cajaId], references: [id])
+  cajaId      String
+  tipo        String // venta, retiro, gasto
+  monto       Decimal
+  descripcion String?
+  createdAt   DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────
+// Usuarios
+// ─────────────────────────────────────────────
+
+enum RolUsuario {
+  MOZO
+  CAJERO
+  COCINERO
+  ADMIN
+}
+
+model Usuario {
+  id       String     @id @default(cuid())
+  local    Local?     @relation(fields: [localId], references: [id]) // null = admin multi-local
+  localId  String?
+  nombre   String
+  email    String     @unique
+  password String
+  rol      RolUsuario
+
+  pedidos Pedido[]
+  cajas   Caja[]
+}
